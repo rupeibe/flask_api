@@ -1,13 +1,16 @@
 
 import os
+import io
+import base64
 import requests
 import pandas as pd
-import seaborn as sns
+from PIL import Image
+import plotly.io as pio
+import plotly.express as px
 import matplotlib.pyplot as plt
 from datetime import datetime,timedelta
-from flask import Flask, jsonify, request
-from matplotlib.ticker import FuncFormatter
-from sqlalchemy import create_engine, text, MetaData, Table
+from sqlalchemy import create_engine, text
+from flask import Flask, request, send_file, render_template
 
 app = Flask(__name__)
 
@@ -16,7 +19,7 @@ tabla = 'red_electrica'
 
 @app.route('/')
 def index():
-    return jsonify("<h1>Conexión disponible</h1>")
+    return render_template('index.html')
 
 @app.route('/get_demand')
 def db():
@@ -71,10 +74,18 @@ def db():
 
     df = pd.concat(dataframes, ignore_index=True)
 
+    # Insertar en base de datos PostgreSQL
+    df_existente = pd.read_sql_table(tabla, con=engine)
+    df_combinado = pd.concat([df_existente, df], ignore_index=True)
+    df_sin_duplicados = df_combinado.drop_duplicates()
+    df_sin_duplicados.to_sql(tabla, con=engine, if_exists='append', index=False)
+
     time = request.args['time']
     plot_type = request.args['plot_type']
 
     plt.figure(figsize=(6.5, 4.5))
+
+    buffer = io.BytesIO()
 
     if time == "year":
         title = "Años"
@@ -86,55 +97,77 @@ def db():
         title = "Horas del día"
 
     if plot_type == "barplot":
-        sns.barplot(data=df, x=time, y="value", errorbar=None, color= "blue")
+        fig = px.bar(df, x=time, y="value")
+        fig.update_layout(
+            title=f"Demanda eléctrica peninsular por {title}",
+            xaxis_title=title,
+            title_font=dict(color='white', size=8),
+            yaxis_title="Consumo (MW)",
+            font=dict(size=9),
+            plot_bgcolor='rgba(0, 0, 0, 0)',
+            paper_bgcolor='rgba(0, 0, 0, 0)',
+            xaxis=dict(title_font=dict(size=6), tickfont=dict(size=4), dtick=1),
+            yaxis=dict(title_font=dict(size=6), tickfont=dict(size=4), tickformat=".2s"),
+            margin=dict(t=20),
+            title_x=0.75,  # Alinear el título a la derecha
+            title_y=0.95)  # Alinear el título hacia la parte superior del gráfico)
+            # Configurar opciones de estilo para las etiquetas y títulos de los ejes
+              # Ajustar el margen superior (valor negativo para reducir la distancia)
+        fig.update_xaxes(title_font=dict(color='white'), tickfont=dict(color='white'))
+        fig.update_yaxes(title_font=dict(color='white'), tickfont=dict(color='white'))
+        pio.write_image(fig, buffer, format='png', scale=3, width=400, height=250)
+       
     elif plot_type == "lineplot":
-        sns.lineplot(data=df, x=time, y="value", errorbar=None, marker="o", color= "blue")
+        df_sum = df.groupby(time)["value"].sum().reset_index()
+        fig = px.line(df_sum, x=time, y="value", markers=True)
+        fig.update_traces(line=dict(width=2)) 
+        fig.update_layout(
+            title=f"Demanda eléctrica peninsular por {title}",
+            xaxis_title=title,
+            title_font=dict(color='white', size=8),
+            yaxis_title="Consumo (MW)",
+            font=dict(size=9),
+            plot_bgcolor='rgba(0, 0, 0, 0)',
+            paper_bgcolor='rgba(0, 0, 0, 0)',
+            xaxis=dict(title_font=dict(size=6), tickfont=dict(size=4), dtick=1, showline=True, zeroline=True),
+            yaxis=dict(title_font=dict(size=6), tickfont=dict(size=4), tickformat=".2s"),
+            xaxis_showgrid=False,
+            margin=dict(t=20),
+            title_x=0.75,  # Alinear el título a la derecha
+            title_y=0.95)  # Oculta las líneas verticales del grid        
+        # Limitar el eje x
+        x_min = df_sum[time].min()
+        x_max = df_sum[time].max()
+        # Configurar opciones de estilo para las etiquetas y títulos de los ejes
+        fig.update_xaxes(title_font=dict(color='white'), tickfont=dict(color='white'), range=[x_min-0.2, x_max+0.5])
+        fig.update_yaxes(title_font=dict(color='white'), tickfont=dict(color='white'))
+    pio.write_image(fig, buffer, format='png', scale=3, width=400, height=250)
+    
+    buffer.seek(0)
 
-    # Función personalizada para formatear los valores del eje y
-    def format_y_axis(value, _):
-        if value >= 1000:
-            value = f"{value/1000:.0f}K"
-        return value
+    # Cargar la imagen original desde el búfer de Bytes
+    imagen_original = Image.open(buffer)
 
-    # Ajustar el formato de los valores del eje y
-    formatter = FuncFormatter(format_y_axis)
-    plt.gca().yaxis.set_major_formatter(formatter)
+    # Obtener los datos de la imagen original en formato PNG
+    imagen_data = io.BytesIO()
+    imagen_original.save(imagen_data, format='PNG')
+    imagen_data.seek(0)
 
-    plt.xlabel(f"{title}")
-    plt.xticks(fontsize=9)
-    plt.ylabel("Consumo (MW)")
-    plt.yticks(fontsize=9)
-    plt.title(f"Demanda eléctrica peninsular por {title}")
-    plt.show()
-     
-    # Insertar base de datos PostgreSQL
-    df_existente = pd.read_sql_table(tabla, con=engine)
-    df_combinado = pd.concat([df_existente, df], ignore_index=True)
-    df_sin_duplicados = df_combinado.drop_duplicates()
-    df_sin_duplicados.to_sql(tabla, con=engine, if_exists='append', index=False)
+    # Codificar la imagen original en Base64
+    imagen_codificada = base64.b64encode(imagen_data.getvalue()).decode("utf-8")
 
-    return f'Registros insertados'
+    return render_template('image.html', imagen_codificada=imagen_codificada)
+
 
 @app.route('/get_db_data')
 def get_db_data():
-    
     df = pd.DataFrame(pd.read_sql_query(text("""SELECT value, date FROM red_electrica"""), con=engine.connect()))
 
-    # Generar la tabla HTML con estilos
-    html_table = '<table style="border-collapse: collapse; width: 100%;">'
-    html_table += '<tr style="background-color: lightgray; text-align: center;">'
-    for column in df.columns:
-        html_table += f'<th style="border: 1px solid black; padding: 8px;">{column}</th>'
-    html_table += '</tr>'
-    for _, row in df.iterrows():
-        html_table += '<tr>'
-        for value in row:
-            html_table += f'<td style="border: 1px solid black; padding: 8px; text-align: center;">{value}</td>'
-        html_table += '</tr>'
-    html_table += '</table>'
+    # Generar el código HTML de la tabla con aspecto de DataFrame de Pandas
+    html_table = df.to_html(classes='pandas-table', index=False)
 
-    # Devolver la respuesta HTML
-    return html_table
+    # Renderizar el archivo HTML con los datos de la tabla
+    return render_template('tabla.html', tabla=html_table)
 
 @app.route('/wipe_data')
 def borrar_tabla():

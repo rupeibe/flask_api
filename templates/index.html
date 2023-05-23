@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Conexión disponible</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #18171c; /* Color de fondo gris */
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            margin-top: 100px;
+        }
+		h1 {
+            color: white; /* Color de fuente blanco */
+        }
+        .image-container {
+            width: 100px; /* Ancho deseado de la imagen */
+            height: auto; /* Altura automática proporcional a la anchura */
+            margin: 20px auto; /* Margen superior e inferior de 20px y centrado horizontalmente */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Conexión disponible</h1>
+        <img src="{{ url_for('static', filename='images/image.png') }}" alt="Imagen">
+    </div>
+</body>
+</html>

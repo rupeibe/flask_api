@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tabla de Datos</title>
+    <style>
+        #tabla-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 800px;
+            height: 400px;
+            margin: 0 auto;
+        }
+
+        .pandas-table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        
+        .pandas-table th, .pandas-table td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: center;
+        }
+        
+        .pandas-table th {
+            background-color: lightgray;
+        }
+    </style>
+</head>
+<body>
+    <div id="tabla-container">
+        {{ tabla | safe }}
+    </div>
+</body>
+</html>
