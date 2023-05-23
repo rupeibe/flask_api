@@ -11,9 +11,12 @@ from sqlalchemy import create_engine, text, MetaData, Table
 
 app = Flask(__name__)
 
+engine = create_engine('postgresql://postgres:ZKqBxNKa5wCs3Qc6ckmw@containers-us-west-156.railway.app:7633/railway')
+tabla = 'red_electrica'
+
 @app.route('/')
 def index():
-    return jsonify({"Choo Choo": "Welcome to your Flask app 🚅"})
+    return jsonify("<h1>Conexión disponible</h1>")
 
 @app.route('/get_demand')
 def db():
@@ -103,74 +106,54 @@ def db():
     plt.yticks(fontsize=9)
     plt.title(f"Demanda eléctrica peninsular por {title}")
     plt.show()
-    
-    #Insertar base de datos PostgreSQL
+     
+    # Insertar base de datos PostgreSQL
+    df_existente = pd.read_sql_table(tabla, con=engine)
+    df_combinado = pd.concat([df_existente, df], ignore_index=True)
+    df_sin_duplicados = df_combinado.drop_duplicates()
+    df_sin_duplicados.to_sql(tabla, con=engine, if_exists='append', index=False)
 
-    '''
-    ------------------------------------------------------
-    Alternativa para almacenar únicamente los datos únicos
-    ------------------------------------------------------
-
-    Insertar los nuevos datos en la tabla temporal, incluyendo los duplicados:
-    INSERT INTO tabla_temporal (dato) VALUES ('dato1'), ('dato2'), ('dato3')...;
-
-    Eliminar los registros duplicados de la tabla temporal:
-    DELETE FROM tabla_temporal WHERE (dato) IN (SELECT dato FROM tabla_original);
-
-    Borrar la tabla original:
-    DELETE FROM tabla_original;
-
-    Copiar los datos de la tabla temporal a la tabla original:
-    INSERT INTO tabla_original (dato) SELECT dato FROM tabla_temporal;
-
-    Borrar la tabla temporal:
-    DROP TABLE tabla_temporal;
-
-    -----------------
-    Otra alternativa:
-    -----------------
-    El procesamiento incremental implica identificar y procesar solo los datos nuevos que se han agregado
-    desde el último procesamiento, en lugar de procesar todos los datos cada vez. Esto puede reducir el tiempo
-    de procesamiento al evitar la repetición de operaciones en datos que ya han sido procesados anteriormente
-    '''
-
-    engine = create_engine(
-        'postgresql://postgres:DrJMB39jcIkVMIYR7RNi@containers-us-west-53.railway.app:7081/railway')
-    
-    metadata = MetaData()
-    table = Table('red_electrica', metadata, autoload_with=engine)
-
-    with engine.connect() as conn:
-        select_statement = table.select()
-        result_set = conn.execute(select_statement)
-        db_list = []
-        for row in result_set:
-            dicc = {'value':row[1], 'date':row[2], 'year':row[3], 'month':row[4], 'day':row[5], 'hour':row[6]}
-            db_list.append(dicc)
-    db = pd.DataFrame(db_list)
-    
-    values = df[~df.isin(db).all(axis=1)].values
-    
-    db2 = pd.DataFrame(values,columns=['value','date','year','month','day','hour'])
-    num_rows_inserted = db2.to_sql('ree', if_exists="replace", con=engine)
-    return f'{num_rows_inserted} rows inserted'
+    return f'Registros insertados'
 
 @app.route('/get_db_data')
 def get_db_data():
     
-    engine = create_engine('postgresql://postgres:8smvRuYuENexj3ThMtek@containers-us-west-168.railway.app:7117/railway')
-    pd.read_sql_query(text("""SELECT * FROM ree"""), con=engine.connect())
+    df = pd.DataFrame(pd.read_sql_query(text("""SELECT value, date FROM red_electrica"""), con=engine.connect()))
+
+    # Generar la tabla HTML con estilos
+    html_table = '<table style="border-collapse: collapse; width: 100%;">'
+    html_table += '<tr style="background-color: lightgray; text-align: center;">'
+    for column in df.columns:
+        html_table += f'<th style="border: 1px solid black; padding: 8px;">{column}</th>'
+    html_table += '</tr>'
+    for _, row in df.iterrows():
+        html_table += '<tr>'
+        for value in row:
+            html_table += f'<td style="border: 1px solid black; padding: 8px; text-align: center;">{value}</td>'
+        html_table += '</tr>'
+    html_table += '</table>'
+
+    # Devolver la respuesta HTML
+    return html_table
 
 @app.route('/wipe_data')
-def wipe_data():
+def borrar_tabla():
+    secret = request.args.get('secret')
 
-    secret = "borrar_bbdd"
-    arg_secret = request.args['secret']
+    if secret == 'borrar':
 
-    if arg_secret == secret:
-        engine = create_engine('postgresql://postgres:8smvRuYuENexj3ThMtek@containers-us-west-168.railway.app:7117/railway')
-        pd.read_sql_query(text("""DELETE FROM ree WHERE 1=1"""), con=engine.connect())
-    
+        # Ejecutar la consulta para borrar el contenido de la tabla
+        with engine.connect() as connection:
+            connection.execute(text(f"DELETE FROM {tabla}"))
+
+        # Leer los registros de la tabla después de borrar
+        with engine.connect() as connection:
+            registros = pd.read_sql_query(f"SELECT COUNT(*) FROM {tabla}", con=connection)
+
+        return f"<h1>El contenido de la tabla '{tabla}' ha sido borrado.</h1> Registros restantes: {registros}"
+    else:
+        return "<h1>Palabra incorrecta. No se ha borrado nada.</h1>"
+ 
 if __name__ == '__main__':
     app.run(debug=True, port=os.getenv("PORT", default=5000))
 
